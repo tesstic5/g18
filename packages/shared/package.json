@@ -1,0 +1,38 @@
+{
+  "name": "@casino/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./constants/errors": "./src/constants/errors.ts",
+    "./constants/games": "./src/constants/games.ts",
+    "./constants/panel-perms": "./src/constants/panel-perms.ts",
+    "./constants/lucky-number": "./src/constants/lucky-number.ts",
+    "./constants/limits": "./src/constants/limits.ts",
+    "./constants/tower": "./src/constants/tower.ts",
+    "./constants/plinko": "./src/constants/plinko.ts",
+    "./constants/support": "./src/constants/support.ts",
+    "./types": "./src/types/index.ts",
+    "./validators": "./src/validators/index.ts",
+    "./utils/money": "./src/utils/money.ts",
+    "./utils/phone": "./src/utils/phone.ts",
+    "./utils/validateConfig": "./src/utils/validateConfig.ts",
+    "./validators/game-choices": "./src/validators/game-choices.ts"
+  },
+  "scripts": {
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "decimal.js": "^10.6.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
+  }
+}

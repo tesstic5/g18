@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN "kycStatus" TEXT NOT NULL DEFAULT 'NONE';

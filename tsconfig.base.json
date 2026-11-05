@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "noEmit": false,
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["packages/shared/src/*"],
+      "@game-core/*": ["packages/game-core/src/*"]
+    }
+  },
+  "exclude": ["node_modules", "dist", ".next", "coverage"]
+}

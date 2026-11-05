@@ -1,0 +1,47 @@
+{
+  "name": "@casino/web",
+  "version": "1.4.3",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint src --ext .ts,.tsx",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e:api": "node e2e/full-e2e.mjs && node e2e/security.test.mjs && node e2e/session-games.mjs && node e2e/wingo-rounds.mjs",
+    "test:e2e:ui": "node e2e/gameui-smoke.mjs && node e2e/gameui-outcome.mjs && node e2e/wingo-ui.mjs && node e2e/accessibility.mjs"
+  },
+  "dependencies": {
+    "@casino/shared": "workspace:*",
+    "@tanstack/react-query": "^5.101.4",
+    "howler": "^2.2.4",
+    "next": "16.3.5",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-hot-toast": "^2.6.0",
+    "socket.io-client": "^4.8.3",
+    "zod": "^4.4.3",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@testing-library/dom": "10",
+    "@testing-library/react": "16",
+    "@types/howler": "^2.2.13",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "autoprefixer": "^10.5.4",
+    "axe-core": "^4.10.3",
+    "esbuild": "^0.28.2",
+    "jsdom": "26",
+    "postcss": "^8.5.26",
+    "puppeteer-core": "^24.16.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

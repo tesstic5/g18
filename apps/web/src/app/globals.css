@@ -1,0 +1,724 @@
+/* apps/web/src/app/globals.css — canonical design system (docs/18 v5) on Tailwind v4
+   Tokens, utilities, motion, light theme, mobile fixes. */
+@import 'tailwindcss';
+
+@theme {
+  /* Fonts (docs/18 ROLE system) */
+  --font-display: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Palette (docs/18 tokens) */
+  --color-gold: #f5c842;
+  --color-gold-dim: #c9a227;
+  --color-green: #00d97e;
+  --color-green-dim: #00a860;
+  --color-red: #ff3b5c;
+  --color-red-dim: #cc2244;
+  --color-blue: #4d9fff;
+  --color-purple: #9b59ff;
+  --color-orange: #ff7c2a;
+
+  /* Depth layers (docs/18) */
+  --color-layer-void: #070709;
+  --color-layer-floor: #0a0a0f;
+  --color-layer-surface: #111118;
+  --color-layer-elevated: #1a1a26;
+  --color-layer-floating: #222232;
+  --color-layer-light: #2c2c40;
+
+  /* Motion (docs/18) */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-in-expo: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Radius (docs/18) */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+
+  /* Animations (docs/18 + docs/21 shared) */
+  --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+  --animate-pulse-gold: pulse-gold 2s ease-in-out infinite;
+  --animate-spring-in: spring-in 300ms var(--ease-spring);
+  --animate-slide-up: slide-up 250ms var(--ease-out-expo);
+}
+
+/* ── BASE ─────────────────────────────────────────────── */
+:root {
+  --bg-primary: #0a0a0f;
+  --bg-surface: #111118;
+  --bg-elevated: #1a1a26;
+  --bg-input: #1e1e2a;
+  --bg-hover: #22222f;
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --text-primary: #ffffff;
+  --text-secondary: #8b8b9e;
+  --text-muted: #55556a;
+}
+
+html {
+  color-scheme: dark;
+}
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Light theme overrides (docs/18 LIGHT THEME) */
+[data-theme='light'] {
+  color-scheme: light;
+  --bg-primary: #f4f4f8;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f8f8fc;
+  --bg-input: #ebebf2;
+  --bg-hover: #efeff5;
+  --border-subtle: rgba(0, 0, 0, 0.04);
+  --border-default: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  --text-primary: #0a0a0f;
+  --text-secondary: rgba(10, 10, 15, 0.55);
+  --text-muted: rgba(10, 10, 15, 0.3);
+}
+[data-theme='light'] body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* ── TYPOGRAPHY UTILITIES (docs/18) ───────────────────── */
+.t-hero {
+  font-family: var(--font-display);
+  font-size: clamp(48px, 12vw, 80px);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+.t-title {
+  font-family: var(--font-display);
+  font-size: clamp(32px, 8vw, 48px);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+.t-headline {
+  font-family: var(--font-display);
+  font-size: clamp(24px, 6vw, 36px);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+.t-label-xl {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.t-label-lg {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+}
+.t-label-md {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.t-label-sm {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+.t-body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.65;
+}
+.t-mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+}
+.t-num-xl {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+/* v1.3.8: header balance-chip amount — the old 20px t-num-xl blew past the
+   right-cluster width on ≤390px phones and pushed header elements on top of
+   each other. Scales 15→20px with viewport, always ends at the same 20px
+   desktop look. Games + player shell now share this class. */
+.t-num-hd {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  font-size: clamp(15px, 4.6vw, 20px);
+}
+.t-num-lg {
+  font-family: var(--font-sans);
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.t-num-md {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.t-num-sm {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Text colors (docs/18 application rules) */
+.text-primary {
+  color: var(--text-primary);
+}
+.text-secondary {
+  color: var(--text-secondary);
+}
+.text-muted {
+  color: var(--text-muted);
+}
+.text-gold {
+  color: #f5c842;
+}
+.text-green {
+  color: #00d97e;
+}
+.text-red {
+  color: #ff3b5c;
+}
+.text-blue {
+  color: #4d9fff;
+}
+
+/* Depth layer utilities */
+.bg-layer-void {
+  background: #070709;
+}
+.bg-layer-floor {
+  background: var(--bg-primary);
+}
+.bg-layer-surface {
+  background: var(--bg-surface);
+}
+.bg-layer-elevated {
+  background: var(--bg-elevated);
+}
+.bg-layer-floating {
+  background: var(--bg-hover);
+}
+.bg-layer-light {
+  background: #2c2c40;
+}
+
+/* ── LAYOUT (docs/18 golden constraint: 100dvh viewport lock) ── */
+.game-page {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-primary);
+  overscroll-behavior: none;
+}
+.game-canvas {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.game-controls {
+  flex: 0 0 auto;
+}
+/* The bet-history panel used to take a fixed 180px on a 880px screen — more
+   than a fifth of the phone — and on a fresh game it is showing the words
+   "No bets yet". Meanwhile the BOARD was being scaled down to 0.5 to fit what
+   was left, which is why roulette's numbers ended up 13px tall. The board is
+   the game; the history is a log. 116px still shows two rows plus the tabs. */
+.game-history {
+  flex: 0 0 auto;
+  height: 116px;
+  overflow-y: auto;
+}
+
+/* D-087: on short viewports give games more room — shrink history, tighten
+   padding so game art is never cut off at the top. */
+@media (max-height: 760px) {
+  .game-history {
+    height: 96px;
+  }
+  .game-canvas {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+}
+/* D-096: on phone-height viewports (now that game pages own the full screen)
+   shrink history further so the game itself fits without scrolling. */
+@media (max-height: 680px) {
+  .game-history {
+    height: 78px;
+  }
+  .game-canvas {
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+}
+@media (max-height: 620px) {
+  .game-history {
+    height: 68px;
+  }
+}
+
+/* ── FIT-TO-CANVAS (game boards must never scroll) ─────────────────────
+   Each game board is built as:
+
+       <div class="relative w-full h-full overflow-y-auto">   <- scroll wrapper
+         <div class="min-h-full w-full flex flex-col ...">    <- the board
+
+   That scroll wrapper is why "some game elements are not fitting in
+   properly": when the board was taller than the canvas the surplus became a
+   scrollbar and the player simply never saw it. Measured at 420x640:
+   roulette hid 259px, scratch-card 186px, tower 133px, mines 92px, wheel 84px.
+
+   GameBackdrop now wraps every board in FitToCanvas, which scales the board
+   down so all of it is on screen. For that to work the inner wrapper must stop
+   swallowing the overflow — otherwise it reports its own clipped height and the
+   fitter has nothing to measure. So inside a fit board the wrapper grows to its
+   content instead of scrolling, and keeps centring while it still fits. */
+[data-fit-board] .overflow-y-auto {
+  overflow: visible !important;
+  height: auto !important;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Safe areas (docs/18) */
+.top-bar {
+  padding-top: env(safe-area-inset-top);
+}
+.bottom-nav {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 8px);
+}
+
+/* ── COMPONENT STYLES (docs/18) ───────────────────────── */
+/* Primary CTA.
+   The old style was a flat, very saturated #00e688 -> #00b368 with a wide
+   neon glow and loose letter-spacing — it read as acid plastic and fought the
+   gold branding. This is a deeper, calmer emerald with a real light source:
+   a fine highlight along the top edge, a soft grounded shadow instead of a
+   glow blast, and white text (the near-black green text on bright green was
+   the main reason it looked cheap). */
+.btn-primary {
+  height: 52px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #16c672 0%, #0f9d57 52%, #0c854a 100%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+    0 2px 6px rgba(0, 0, 0, 0.28),
+    0 6px 18px rgba(12, 133, 74, 0.28);
+  color: #ffffff;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.22);
+  transition:
+    filter 140ms ease,
+    transform 90ms ease,
+    box-shadow 140ms ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+@media (hover: hover) {
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.07);
+  }
+}
+.btn-primary:active:not(:disabled) {
+  transform: translateY(1px);
+  filter: brightness(0.95);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.25),
+    0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.btn-primary:focus-visible {
+  outline: 2px solid rgba(22, 198, 114, 0.9);
+  outline-offset: 2px;
+}
+.btn-primary:disabled {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.34);
+  text-shadow: none;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* D-105: brand-gold primary CTA (login / signup / admin login) — matches the
+   gold diamond "2" + crown branding instead of the green generic primary. */
+.btn-gold {
+  height: 52px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffd76a 0%, #f0b42c 100%);
+  border: 1px solid rgba(255, 215, 106, 0.45);
+  box-shadow:
+    0 4px 20px rgba(245, 200, 66, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  color: #3d2800;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: all 150ms ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-gold:hover {
+  filter: brightness(1.07);
+}
+.btn-gold:active {
+  transform: scale(0.975) translateY(1px);
+  box-shadow: 0 2px 10px rgba(245, 200, 66, 0.25);
+}
+.btn-gold:disabled {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.25);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* D-102: shine sweep for primary CTAs (signup etc.) — a soft highlight that
+   glides across the button, matching the site's polished CTA feel. */
+@keyframes btnShine {
+  0% {
+    transform: translateX(-120%) skewX(-12deg);
+  }
+  60% {
+    transform: translateX(320%) skewX(-12deg);
+  }
+  100% {
+    transform: translateX(320%) skewX(-12deg);
+  }
+}
+.animate-btn-shine {
+  animation: btnShine 2.4s ease-in-out infinite;
+}
+
+.balance-chip {
+  background: rgba(245, 200, 66, 0.08);
+  border: 1px solid rgba(245, 200, 66, 0.18);
+}
+
+/* ── BUTTON SYSTEM (D-072) — one language for every CTA ─────────────────
+   .btn-primary  = main action (green solid)      — height 52px
+   .btn-outline-gold = secondary action (gold outline) — height via utility
+   .btn-ghost    = tertiary action (subtle white)
+   .btn-danger   = destructive action (red outline)
+   All share the same typography/transition so buttons match everywhere. */
+.btn-outline-gold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(245, 200, 66, 0.1);
+  border: 1px solid rgba(245, 200, 66, 0.4);
+  color: #f5c842;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: all 150ms ease;
+}
+.btn-outline-gold:hover {
+  background: rgba(245, 200, 66, 0.18);
+}
+.btn-outline-gold:active {
+  transform: scale(0.975);
+}
+.btn-outline-gold:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: all 150ms ease;
+}
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+.btn-ghost:active {
+  transform: scale(0.975);
+}
+.btn-ghost:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(255, 59, 92, 0.1);
+  border: 1px solid rgba(255, 59, 92, 0.4);
+  color: #ff3b5c;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: all 150ms ease;
+}
+.btn-danger:hover {
+  background: rgba(255, 59, 92, 0.18);
+}
+.btn-danger:active {
+  transform: scale(0.975);
+}
+.btn-danger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── KEYFRAMES (docs/18 + docs/21 shared) ─────────────── */
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+@keyframes pulse-gold {
+  0%,
+  100% {
+    box-shadow: 0 0 20px rgba(245, 200, 66, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(245, 200, 66, 0.6);
+  }
+}
+@keyframes spring-in {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes slide-up {
+  0% {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+@keyframes float-win {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.5);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(-10px) scale(1.1);
+  }
+  20% {
+    transform: scale(1);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-70px);
+  }
+}
+@keyframes float-lose {
+  0% {
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+}
+@keyframes feed-in {
+  0% {
+    height: 0;
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  100% {
+    height: 48px;
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes ticker-scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+.animate-ticker {
+  animation: ticker-scroll 30s linear infinite;
+}
+.animate-ticker:hover {
+  animation-play-state: paused;
+}
+.animate-float-win {
+  animation: float-win 1100ms ease-out forwards;
+}
+.animate-float-lose {
+  animation: float-lose 800ms ease-out forwards;
+}
+
+/* Shimmer skeleton (docs/19 §2) */
+.skeleton {
+  background: linear-gradient(
+    105deg,
+    var(--bg-surface) 40%,
+    rgba(255, 255, 255, 0.04) 50%,
+    var(--bg-surface) 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* ── SCROLLBAR (docs/20 §14) ──────────────────────────── */
+::-webkit-scrollbar {
+  width: 2px;
+  height: 2px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 1px;
+}
+
+/* Respect OS motion preferences without changing server/result timing. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* iOS fixes (docs/20 §14) */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+.game-canvas,
+.bet-button,
+.game-tile {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.game-canvas {
+  -webkit-touch-callout: none;
+}
+
+/* Landscape game layout (docs/20 §14) */
+@media (orientation: landscape) and (max-height: 500px) {
+  .bet-panel-landscape {
+    position: fixed;
+    right: 0;
+    top: 0;
+    width: 300px;
+    height: 100dvh;
+    overflow-y: auto;
+  }
+  .bottom-nav {
+    display: none;
+  }
+}
+
+/* ── D-064: ambient game-backdrop animations ────────────────────────────── */
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(18px, 22px) scale(1.12);
+  }
+}
+@keyframes float-slower {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-22px, -14px) scale(1.08);
+  }
+}
+.animate-float-slow {
+  animation: float-slow 14s ease-in-out infinite;
+}
+.animate-float-slower {
+  animation: float-slower 18s ease-in-out infinite;
+}

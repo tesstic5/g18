@@ -1,0 +1,61 @@
+{
+  "name": "casino-games-platform",
+  "private": true,
+  "license": "UNLICENSED",
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:engine": "pnpm --filter @casino/api test:engine",
+    "test:e2e:api": "pnpm --filter @casino/web test:e2e:api",
+    "test:e2e:ui": "pnpm --filter @casino/web test:e2e:ui",
+    "format": "prettier --write .",
+    "db:migrate": "pnpm --filter @casino/api exec prisma migrate dev",
+    "db:seed": "pnpm --filter @casino/api exec prisma db seed",
+    "db:studio": "pnpm --filter @casino/api exec prisma studio",
+    "reconcile": "pnpm --filter @casino/api exec tsx ../../scripts/reconcile.ts",
+    "prepare": "husky || true"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@next/eslint-plugin-next": "^16.3.5",
+    "eslint": "^10.8.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
+    "prettier": "^3.9.6",
+    "turbo": "^2.10.9",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,css}": [
+      "prettier --write"
+    ]
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "bcrypt",
+      "esbuild",
+      "msgpackr-extract",
+      "prisma"
+    ],
+    "overrides": {
+      "deepmerge-ts": "^8.0.0",
+      "esbuild": ">=0.28.1"
+    }
+  }
+}

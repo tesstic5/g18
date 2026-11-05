@@ -1,0 +1,355 @@
+# docker-compose.yml — THE stack definition. One file, both uses.
+#
+#   VPS (Dokploy)  Dokploy → service type "Docker Compose" → Compose Path: docker-compose.yml
+#                  Dokploy's Traefik owns 80/443. The host ports below are
+#                  LOOPBACK-ONLY; attach your domains to web:3000 and minio:9000
+#                  and Traefik reaches them over the Docker network.
+#   Local          cp .env.example .env, fill the required values, then
+#                  docker compose up -d --build   →  http://localhost:8080
+#                  The API runs NODE_ENV=production here, so for plain-HTTP
+#                  local use set COOKIE_SECURE=false (see the api service)
+#                  or the browser will refuse the login cookies.
+#
+# Variables with ":?" abort the deploy with that message if unset — that is
+# deliberate: a missing value should never silently become an empty string.
+#
+services:
+  web:
+    # ── Container hardening (security inventory) ──────────────────────────
+    # no-new-privileges: a process inside the container can never gain
+    # privileges through a setuid binary — cheap, and it cannot break a
+    # service that was not already trying to escalate.
+    security_opt:
+      - no-new-privileges:true
+    # Bounded logs: an unbounded json-file log is how a chatty container fills
+    # the host disk and takes the database down with it.
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+        - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
+        - NEXT_PUBLIC_SITE_URL=${FRONTEND_URL}
+        - NEXT_PUBLIC_PLATFORM_NAME=${NEXT_PUBLIC_PLATFORM_NAME:-YourBrand}
+        - NEXT_PUBLIC_PLATFORM_TAGLINE=${NEXT_PUBLIC_PLATFORM_TAGLINE:-Play. Win. Repeat.}
+        - NEXT_PUBLIC_CURRENCY_SYMBOL=${NEXT_PUBLIC_CURRENCY_SYMBOL:-₨}
+        # CRITICAL: next.config reads INTERNAL_API_URL at BUILD time (the prod
+        # same-origin rewrite). Must be a build arg, not only a runtime env.
+        - INTERNAL_API_URL=${INTERNAL_API_URL:-http://api:4000/api/v1}
+        # Small VPS (2 GB, no swap): Next 16 builds with Turbopack and can be
+        # OOM-killed (Docker exit 137). Set NEXT_BUILD_WEBPACK=1 in the Dokploy
+        # Environment to build with webpack instead — slower, ~1 GB, verified.
+        - NEXT_BUILD_WEBPACK=${NEXT_BUILD_WEBPACK:-0}
+    environment:
+      - NODE_ENV=production
+      # Next standalone binds to HOSTNAME; Docker injects the container-id there,
+      # breaking the bind → Dokploy/Traefik 502. Explicitly force 0.0.0.0 (D-049).
+      - HOSTNAME=0.0.0.0
+      - FRONTEND_URL=${FRONTEND_URL}
+      - NEXT_PUBLIC_SITE_URL=${FRONTEND_URL}
+      - INTERNAL_API_URL=${INTERNAL_API_URL:-http://api:4000/api/v1}
+    ports:
+      # Hardened: default to 127.0.0.1 loopback so direct unencrypted HTTP to
+      # http://YOUR_VPS_IP:8080 is blocked from the outside internet. Dokploy's
+      # Traefik routes your domain (HTTPS :443) directly to this container.
+      # Override with WEB_BIND_IP=0.0.0.0 only for direct IP testing without a domain.
+      - '${WEB_BIND_IP:-127.0.0.1}:${WEB_HOST_PORT:-8080}:3000'
+    depends_on:
+      # D-104: wait for the API to be HEALTHY (not just "started") — the web
+      # container used to start first and proxy to a not-yet-listening API
+      # (ECONNREFUSED on /api and /socket.io during every cold start).
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    # ── Container hardening (security inventory) ──────────────────────────
+    # no-new-privileges: a process inside the container can never gain
+    # privileges through a setuid binary — cheap, and it cannot break a
+    # service that was not already trying to escalate.
+    security_opt:
+      - no-new-privileges:true
+    # Bounded logs: an unbounded json-file log is how a chatty container fills
+    # the host disk and takes the database down with it.
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      - NODE_ENV=production
+      # :? = fail the deploy IMMEDIATELY with this message if the variable is
+      # missing from Dokploy's Environment tab. Without it the container starts
+      # with an empty URL and dies 60s later inside the wait probe, which reads
+      # as "Postgres unreachable" instead of "you forgot a variable".
+      - DATABASE_URL=${DATABASE_URL:?Set DATABASE_URL (e.g. postgresql://casino:YOUR_PG_PASSWORD@postgres:5432/casino?schema=public)}
+      - REDIS_URL=${REDIS_URL:?Set REDIS_URL (e.g. redis://:YOUR_REDIS_PASSWORD@redis:6379)}
+      - JWT_PRIVATE_KEY_B64=${JWT_PRIVATE_KEY_B64}
+      - JWT_PUBLIC_KEY_B64=${JWT_PUBLIC_KEY_B64}
+      # Accepts either name: ENCRYPTION_KEY (current) or AES_ENCRYPTION_KEY
+      # (the original name — existing deployments still set that one).
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-${AES_ENCRYPTION_KEY:-}}
+      - AES_ENCRYPTION_KEY=${AES_ENCRYPTION_KEY:-${ENCRYPTION_KEY:-}}
+      # Retired key(s), comma-separated. Required to READ ciphertext written by
+      # an older deployment — e.g. the payout accounts inside a restored dump or
+      # a JSON backup exported before a key rotation. Without it those rows are
+      # unreadable (everything else restores fine). See docs/KEY-ROTATION.md.
+      - ENCRYPTION_KEY_PREVIOUS=${ENCRYPTION_KEY_PREVIOUS:-}
+      # Session cookies are 'secure' whenever NODE_ENV=production. Set this to
+      # false ONLY for plain-HTTP access (local runs, IP-only testing) — the
+      # browser silently DROPS a secure cookie over http, so the panel would
+      # accept the password and then act signed-out. Leave unset in production.
+      - COOKIE_SECURE=${COOKIE_SECURE:-}
+      - COOKIE_SECRET=${COOKIE_SECRET}
+      # Internal address the API uses to reach storage (Docker network).
+      - S3_ENDPOINT=http://minio:9000
+      # PUBLIC address baked into presigned upload URLs handed to the BROWSER.
+      # This stack has NO nginx (Dokploy's Traefik owns 80/443), so there is no
+      # /storage proxy path — the browser talks to MinIO directly on :9000,
+      # which is published below. An internal hostname here makes every
+      # deposit-proof upload fail with ERR_NAME_NOT_RESOLVED.
+      #   testing:  http://YOUR_VPS_IP:9000
+      #   domain:   https://storage.yourdomain.com  (route it in Dokploy → minio:9000)
+      - S3_PUBLIC_ENDPOINT=${S3_PUBLIC_ENDPOINT:-}
+      # M-19: no well-known fallbacks — missing env aborts the deploy loudly.
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:?Set S3_ACCESS_KEY}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:?Set S3_SECRET_KEY}
+      - S3_BUCKET_DEPOSITS=${S3_BUCKET_DEPOSITS:-deposit-proofs}
+      - S3_BUCKET_AVATARS=${S3_BUCKET_AVATARS:-user-avatars}
+      - FRONTEND_URL=${FRONTEND_URL}
+      # PayFast endpoint origins are operator-approved; merchant setup lives in the encrypted admin configuration.
+      - PAYFAST_ALLOWED_ORIGINS=${PAYFAST_ALLOWED_ORIGINS:-https://ipguat.apps.net.pk}
+      - PAYFAST_RECONCILIATION_DISABLED=${PAYFAST_RECONCILIATION_DISABLED:-false}
+      - PAYFAST_MERCHANT_ID=${PAYFAST_MERCHANT_ID:-}
+      - PAYFAST_SECURED_KEY=${PAYFAST_SECURED_KEY:-}
+      - PAYFAST_MERCHANT_NAME=${PAYFAST_MERCHANT_NAME:-}
+      - PAYFAST_STORE_ID=${PAYFAST_STORE_ID:-}
+      - PAYFAST_PUBLIC_API_URL=${PAYFAST_PUBLIC_API_URL:-}
+      - TRUST_PROXY=${TRUST_PROXY:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ADMIN_DEFAULT_USERNAME=${ADMIN_DEFAULT_USERNAME:-superadmin}
+      - ADMIN_DEFAULT_PASSWORD=${ADMIN_DEFAULT_PASSWORD:?Set a strong ADMIN_DEFAULT_PASSWORD (openssl rand -base64 24)}
+      # env-check (production fail-closed) requires these INSIDE the api too:
+      - PG_PASSWORD=${PG_PASSWORD:?Set PG_PASSWORD — must match the password inside DATABASE_URL}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?Set REDIS_PASSWORD — must match the password inside REDIS_URL}
+      # Admin JSON backup/restore: body limit + transaction budget. Optional
+      # (defaults live in the API: 256 MiB / 15 min) — raise for a larger bundle.
+      - BACKUP_MAX_JSON_BYTES=${BACKUP_MAX_JSON_BYTES:-268435456}
+      # Ceiling for a one-file archive restore (database + every image). The
+      # upload parser enforces this itself and answers 413 with a plain-English
+      # message; raise it if a backup exceeds 2 GB.
+      - BACKUP_MAX_ARCHIVE_BYTES=${BACKUP_MAX_ARCHIVE_BYTES:-2147483648}
+      # Restore uploads are sent in pieces this size; a long single request is
+      # cut by an edge proxy (Traefik read timeout), a short one is not.
+      - BACKUP_UPLOAD_CHUNK_BYTES=${BACKUP_UPLOAD_CHUNK_BYTES:-}
+      - RESTORE_TX_TIMEOUT_MS=${RESTORE_TX_TIMEOUT_MS:-900000}
+      - REQUEST_TIMEOUT_MS=${REQUEST_TIMEOUT_MS:-30000}
+    ports:
+      - '${API_BIND_IP:-127.0.0.1}:${API_HOST_PORT:-4000}:4000' # set API_BIND_IP=0.0.0.0 only for explicit direct testing
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    # D-104: healthcheck so downstream containers (web) wait for the API to be
+    # ready instead of racing it (the "Failed to proxy … ECONNREFUSED" on boot).
+    healthcheck:
+      # Use /health, NOT a business route. /api/v1/games returns 503 while
+      # maintenance_mode is ON, which would mark the API unhealthy, stop the
+      # web container from starting, and take the whole site down exactly when
+      # an operator is trying to perform maintenance. /health is exempt.
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(''http://127.0.0.1:4000/health'').then(r=>r.json()).then(j=>process.exit(j.status===''ok''?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    # ── Container hardening (security inventory) ──────────────────────────
+    # no-new-privileges: a process inside the container can never gain
+    # privileges through a setuid binary — cheap, and it cannot break a
+    # service that was not already trying to escalate.
+    security_opt:
+      - no-new-privileges:true
+    # Bounded logs: an unbounded json-file log is how a chatty container fills
+    # the host disk and takes the database down with it.
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      - NODE_ENV=production
+      # :? = fail the deploy IMMEDIATELY with this message if the variable is
+      # missing from Dokploy's Environment tab. Without it the container starts
+      # with an empty URL and dies 60s later inside the wait probe, which reads
+      # as "Postgres unreachable" instead of "you forgot a variable".
+      - DATABASE_URL=${DATABASE_URL:?Set DATABASE_URL (e.g. postgresql://casino:YOUR_PG_PASSWORD@postgres:5432/casino?schema=public)}
+      - REDIS_URL=${REDIS_URL:?Set REDIS_URL (e.g. redis://:YOUR_REDIS_PASSWORD@redis:6379)}
+      # Nightly db-backup (worker). BACKUP_DIR MUST be the mounted volume —
+      # without it every backup died with the container on redeploy.
+      # Same key material as the API. The worker WRITES the nightly encrypted
+      # backup (dailyBackup → exportJson → encryptJson → key()) and decrypts the
+      # stored SMTP password to email that file. key() THROWS in production when
+      # no key is set, so without these three lines the 03:00 db-backup cron
+      # failed every single night ("ENCRYPTION_KEY ... must be set in
+      # production") and backup emails could never authenticate.
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-${AES_ENCRYPTION_KEY:-}}
+      - AES_ENCRYPTION_KEY=${AES_ENCRYPTION_KEY:-${ENCRYPTION_KEY:-}}
+      - ENCRYPTION_KEY_PREVIOUS=${ENCRYPTION_KEY_PREVIOUS:-}
+      - BACKUP_DIR=/app/backups
+      # Optional: seal backups for your PUBLIC key so this host cannot read them.
+      # Generate a pair offline:  node scripts/backup-crypto.mjs keygen
+      - BACKUP_RECIPIENT_PUBKEY=${BACKUP_RECIPIENT_PUBKEY:-}
+      - BACKUP_RECIPIENT_PUBKEY_FILE=${BACKUP_RECIPIENT_PUBKEY_FILE:-}
+      # Optional: email the encrypted backup (dependency-free SMTP client).
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_REQUIRE_TLS=${SMTP_REQUIRE_TLS:-true}
+      - SMTP_ALLOW_SELF_SIGNED=${SMTP_ALLOW_SELF_SIGNED:-false}
+      - BACKUP_EMAIL_TO=${BACKUP_EMAIL_TO:-}
+      - BACKUP_EMAIL_MAX_BYTES=${BACKUP_EMAIL_MAX_BYTES:-20971520}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - backup_data:/app/backups
+
+  postgres:
+    # ── Container hardening (security inventory) ──────────────────────────
+    # no-new-privileges: a process inside the container can never gain
+    # privileges through a setuid binary — cheap, and it cannot break a
+    # service that was not already trying to escalate.
+    security_opt:
+      - no-new-privileges:true
+    # Bounded logs: an unbounded json-file log is how a chatty container fills
+    # the host disk and takes the database down with it.
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    image: postgres:17.6-alpine
+    environment:
+      - POSTGRES_DB=casino
+      - POSTGRES_USER=${PG_USER:-casino}
+      - POSTGRES_PASSWORD=${PG_PASSWORD:?Set PG_PASSWORD} # M-19: no default DB password
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${PG_USER:-casino} -d casino']
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+
+  redis:
+    # ── Container hardening (security inventory) ──────────────────────────
+    # no-new-privileges: a process inside the container can never gain
+    # privileges through a setuid binary — cheap, and it cannot break a
+    # service that was not already trying to escalate.
+    security_opt:
+      - no-new-privileges:true
+    # Bounded logs: an unbounded json-file log is how a chatty container fills
+    # the host disk and takes the database down with it.
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    image: redis:7.4-alpine
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      # NOTE: use DOUBLE quotes around the variable — single quotes would pass
+      # the literal "$REDIS_PASSWORD" as the password → WRONGPASS → unhealthy
+      # (caused "dependency failed to start" on Dokploy; D-048).
+      test: ['CMD-SHELL', 'redis-cli -a "$$REDIS_PASSWORD" ping']
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+    restart: unless-stopped
+
+  minio:
+    # ── Container hardening (security inventory) ──────────────────────────
+    # no-new-privileges: a process inside the container can never gain
+    # privileges through a setuid binary — cheap, and it cannot break a
+    # service that was not already trying to escalate.
+    security_opt:
+      - no-new-privileges:true
+    # Bounded logs: an unbounded json-file log is how a chatty container fills
+    # the host disk and takes the database down with it.
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    # MinIO upstream archived the open-source project (Sep 2026) and removed it
+    # from Docker Hub — pull the identical bytes from the Quay mirror instead,
+    # pinned by digest. Long term, migrate to a maintained S3 target (Garage,
+    # SeaweedFS, or a hosted bucket): the API speaks plain S3, only the
+    # endpoint/credentials change. See FIX-PLAN.md.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: server /data --console-address ':9001'
+    environment:
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY:?Set S3_ACCESS_KEY} # M-19
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:?Set S3_SECRET_KEY}
+      # Restrict direct CORS to your frontend origin (for browser presigned uploads)
+      - MINIO_API_CORS_ALLOW_ORIGINS=${FRONTEND_URL:-*}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'mc ready local || curl -fsS http://127.0.0.1:9000/minio/health/live || exit 1',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    ports:
+      # Hardened: default to 127.0.0.1 loopback so direct unencrypted access on
+      # http://YOUR_VPS_IP:9000 is blocked from the outside internet.
+      # Dokploy routes your storage domain (https://storage.yourdomain.com)
+      # through Traefik over HTTPS. Override with MINIO_API_BIND_IP=0.0.0.0
+      # only if you need raw direct IP access without a domain.
+      - '${MINIO_API_BIND_IP:-127.0.0.1}:${MINIO_HOST_PORT:-9000}:9000'
+      - '${MINIO_CONSOLE_BIND_IP:-127.0.0.1}:${MINIO_CONSOLE_HOST_PORT:-9001}:9001' # console stays loopback unless you opt in
+    restart: unless-stopped
+
+volumes:
+  # Nightly encrypted backups (D-062b) — survives redeploys and restarts.
+  backup_data:
+  pg_data:
+  redis_data:
+  minio_data:

@@ -1,0 +1,28 @@
+{
+  "name": "@casino/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup --config tsup.config.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@casino/game-core": "workspace:*",
+    "@casino/shared": "workspace:*",
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
+    "bullmq": "^6.0.11",
+    "decimal.js": "^10.6.0",
+    "dotenv": "^17.0.0",
+    "ioredis": "^5.3.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
+  }
+}

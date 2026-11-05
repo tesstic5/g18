@@ -1,0 +1,15 @@
+**/node_modules
+**/.next
+**/dist
+**/coverage
+**/.turbo
+.git
+.gitignore
+*.log
+**/*.log
+.env
+.env.*
+!.env.example
+!.env.*.example
+.vscode
+.idea

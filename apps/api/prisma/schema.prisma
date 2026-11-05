@@ -1,0 +1,1076 @@
+// ============================================================================
+// CASINO GAMES PLATFORM — COMPLETE PRISMA SCHEMA
+// Canonical source: PROMPT.md §DATABASE SCHEMA (v3/v4) + docs/05 extensions
+// + docs/19 §14 performance indexes + docs/20 §18 FraudSignal.
+// Money = Decimal(18,2); multipliers = Decimal(10,4); JSONB = Json.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────
+// USERS & AUTH
+// ─────────────────────────────────────────
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+  SELF_EXCLUDED
+}
+
+model User {
+  id                String    @id @default(cuid())
+  phone             String    @unique
+  passwordHash      String
+  displayName       String?
+  avatarUrl         String?
+  fingerprintHash   String?
+  lastLoginIp       String?
+  lastLoginCountry  String?
+  language          String    @default("en")
+  theme             String    @default("dark")
+  status            UserStatus @default(ACTIVE)
+
+  // Responsible play
+  selfExcludedUntil DateTime?
+
+  // Account recovery console: set when a recovery request is approved. New
+  // payout accounts are refused and withdrawals are held until it lapses —
+  // a hijacker who talks their way through the review cannot cash out. Only a
+  // super-admin may shorten or clear it (audited, see /panel/recovery).
+  withdrawalFrozenUntil  DateTime?
+  withdrawalFreezeReason String?
+  recoveryRequests       RecoveryRequest[]
+  /// Last N password hashes (security hardening): a new password may not match
+  /// any of them. Pruned to `password_history_depth` on every change.
+  passwordHistory        PasswordHistory[]
+  /// Dual-control wallet credits/debits parked for a second admin.
+  walletAdjustments      WalletAdjustment[]
+
+  // H-17: raises/removals of daily limits take effect after a 24h cooling-off
+  // (lowers apply instantly). A matured pending change is applied lazily by
+  // the responsible-play guard / deposit path.
+  pendingLossLimit    Decimal?  @db.Decimal(18, 2)
+  pendingLossLimitAt  DateTime?
+  pendingDepositLimit Decimal?  @db.Decimal(18, 2)
+  pendingDepositLimitAt DateTime?
+  dailyLossLimit    Decimal?  @db.Decimal(18,2)
+  dailyDepositLimit Decimal?  @db.Decimal(18,2)
+  sessionReminderMin Int?
+
+  // Referral
+  // Codes are stored UPPERCASE (see migration 20260901_referral_reward) and
+  // every lookup normalises the input the same way, so an invite link arrives
+  // the same however it was typed or re-cased in transit.
+  referralCode      String    @unique @default(cuid())
+  referredById      String?
+  referredBy        User?     @relation("Referrals", fields: [referredById], references: [id])
+  referrals         User[]    @relation("Referrals")
+  // Set the moment this account's first approved deposit pays out the referral
+  // bonus. It is the ONCE-ONLY marker: the payout claims it with a conditional
+  // UPDATE, so two concurrent deposit approvals cannot both credit the bonus.
+  // Null = referred but not yet rewarded (or not referred at all).
+  referralRewardedAt DateTime?
+
+  // Referral agent (partner) accounts: created from /panel/referral-users, they
+  // log in ONLY at /referral/login and see a read-only dashboard of the users
+  // who signed up with their referralCode. Commission is paid by the worker's
+  // daily referral-commission cron on referred users' net spend (house GGR).
+  isReferralAgent          Boolean   @default(false)
+  referralCommissionPaidUpTo DateTime?
+  // Per-agent referee SIGNUP bonus: when someone signs up with this agent's
+  // code, the new player's BONUS wallet is credited this amount (0/disabled =
+  // no signup bonus). Separate from the wager-triggered referral bonus.
+  referralSignupBonusEnabled Boolean  @default(false)
+  referralSignupBonusAmount  Decimal   @default(0) @db.Decimal(18,2)
+
+  // Meta
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  lastLoginAt       DateTime?
+  lastActivityAt    DateTime?
+
+  /// SESSION VERSION (security hardening). Stamped into every access/refresh
+  /// token as `sv` and compared on each request. Bumping it (logout-all,
+  /// password change, recovery reset, admin ban) makes tokens that are already
+  /// in the wild stop working AT ONCE — revoking refresh families alone left a
+  /// stolen access token usable for its full 15-minute lifetime.
+  sessionVersion    Int       @default(0)
+
+  // EXTENSION (docs/05 §1): favorites (☆) — game slugs
+  favorites         Json      @default("[]")
+
+  // Onboarding persistence (docs/19 §5)
+  onboardingStep    Int       @default(0)
+  onboardingDone    Boolean   @default(false)
+
+  // KYC — NONE | PENDING | APPROVED | REJECTED. Enforced on withdrawals when
+  // setting ENABLE_KYC is true. Admin 2FA is intentionally not implemented.
+  kycStatus         String    @default("NONE")
+
+  // Relations
+  wallet            Wallet?
+  gameRounds        GameRound[]
+  sharedRoundBets   SharedRoundBet[]
+  seedPairs         SeedPair[]
+  refreshTokens     RefreshTokenFamily[]
+  deposits          Deposit[]
+  withdrawals       Withdrawal[]
+  payoutAccounts    PayoutAccount[]
+  dailyCheckins     DailyCheckin[]
+  notifications     Notification[]
+  supportConvos     SupportConversation[]
+  supportMessages   SupportMessage[] @relation("UserSupportMessages")
+  sentGifts         GiftTransaction[] @relation("GiftSender")
+  receivedGifts     GiftTransaction[] @relation("GiftReceiver")
+  leaderboardEntries LeaderboardEntry[]
+  winStreak         WinStreak?
+  fraudSignals      FraudSignal[]
+  devices           UserDevice[]
+  loginEvents       UserLoginEvent[]
+
+  @@index([phone])
+  @@index([referralCode])
+  @@index([status, createdAt])
+  @@index([referredById])
+  @@index([referredById, referralRewardedAt])
+  @@index([fingerprintHash])
+  @@index([lastLoginIp])
+}
+
+model Wallet {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  user           User      @relation(fields: [userId], references: [id])
+
+  realBalance    Decimal   @default(0) @db.Decimal(18,2)
+  bonusBalance   Decimal   @default(0) @db.Decimal(18,2)
+  giftedBalance  Decimal   @default(0) @db.Decimal(18,2)
+  lockedBalance  Decimal   @default(0) @db.Decimal(18,2)
+
+  // EXTENSION (docs/05 §4): optimistic locking — every balance change must
+  // increment version and guard the update with `where version = expected`.
+  version        Int       @default(0)
+
+  updatedAt      DateTime  @updatedAt
+  transactions   Transaction[]
+}
+
+enum TransactionType {
+  BET
+  WIN
+  REFUND
+  DEPOSIT
+  WITHDRAWAL
+  BONUS_CHECKIN
+  BONUS_SIGNUP
+  BONUS_REFERRAL
+  REFERRAL_COMMISSION
+  BONUS_WINSTREAK
+  BONUS_RAKEBACK
+  GIFT_SENT
+  GIFT_RECEIVED
+  ADMIN_CREDIT
+  ADMIN_DEBIT
+}
+
+enum WalletType {
+  REAL
+  BONUS
+  GIFTED
+  LOCKED
+}
+
+model Transaction {
+  id              String          @id @default(cuid())
+  walletId        String
+  wallet          Wallet          @relation(fields: [walletId], references: [id])
+  userId          String
+
+  type            TransactionType
+  walletType      WalletType
+  amount          Decimal         @db.Decimal(18,2)
+  balanceBefore   Decimal         @db.Decimal(18,2)
+  balanceAfter    Decimal         @db.Decimal(18,2)
+
+  referenceType   String?         // "game_round" | "deposit" | "withdrawal" | "bonus" | "gift"
+  referenceId     String?
+  description     String?
+  createdAt       DateTime        @default(now())
+
+  @@index([walletId, createdAt(sort: Desc)])
+  @@index([userId, type, createdAt])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([referenceType, referenceId])
+}
+
+// ─────────────────────────────────────────
+// GAMES & ROUNDS
+// ─────────────────────────────────────────
+
+enum ForceOverride {
+  NONE
+  FORCE_WIN
+  FORCE_LOSE
+}
+
+model GameConfig {
+  slug              String    @id   // "aviator", "plinko", "wingo", ...
+  displayName       String
+  description       String?
+  thumbnailUrl      String?
+  category          String[]  // ["crash", "popular"]
+  tags              String[]  // ["hot", "new", "provably-fair"]
+  sortOrder         Int       @default(0)
+  isActive          Boolean   @default(true)
+  isFeatured        Boolean   @default(false)
+
+  // EXTENSION (docs/05 §2): demo mode per game
+  demoEnabled       Boolean   @default(false)
+
+  // Core odds configuration
+  baseRtp           Decimal   @db.Decimal(5,2)  // e.g., 96.00
+  winRate           Decimal   @db.Decimal(5,2)  // e.g., 45.00 (%)
+  houseEdge         Decimal   @db.Decimal(5,2)  // auto = 100 - baseRtp
+  maxWinMultiplier  Decimal   @default(25) @db.Decimal(10,2)
+  minBet            Decimal   @default(1) @db.Decimal(18,2)
+  defaultPayout     Decimal   @default(2) @db.Decimal(10,4)
+
+  // Force override
+  forceOverride     ForceOverride @default(NONE)
+  forceRoundsLeft   Int       @default(0)
+  forceMaxPayout    Decimal?  @db.Decimal(18,2)
+
+  // Game-specific config (JSON per game — docs/13)
+  configJson        Json      @default("{}")
+
+  // Stats (cached, updated by worker)
+  totalWagered      Decimal   @default(0) @db.Decimal(18,2)
+  totalPaidOut      Decimal   @default(0) @db.Decimal(18,2)
+  totalRounds       Int       @default(0)
+  effectiveRtp      Decimal?  @db.Decimal(5,2)
+
+  animationSpeed    Decimal   @default(1.0) @db.Decimal(3,2)
+
+  updatedAt         DateTime  @updatedAt
+  updatedBy         String?
+
+  rounds            GameRound[]
+}
+
+enum RoundResult {
+  WIN
+  LOSE
+  CASHOUT   // for crash, mines, tower — player cashed out
+  BUST      // for crash — player didn't cash out
+  PUSH      // stake returned exactly; not a win and does not advance streaks
+  PENDING   // D-092: session games (mines/tower/stairs/hi-lo) — round in progress
+}
+
+model GameRound {
+  id                String    @id @default(cuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id])
+  gameSlug          String
+  game              GameConfig @relation(fields: [gameSlug], references: [slug])
+
+  // Bet
+  betAmount         Decimal   @db.Decimal(18,2)
+  walletTypeUsed    WalletType
+  requestId         String?   // idempotency key (docs/11 hard rule 3)
+  choices           Json      @default("{}") // exact validated player selection used for mapping
+
+  // Provably fair
+  seedPairId        String
+  seedPair          SeedPair  @relation(fields: [seedPairId], references: [id])
+  clientSeed        String
+  nonce             Int
+
+  // Outcome
+  rawOutcome        Decimal   @db.Decimal(18,16) // raw 0-1 float from HMAC
+  mappedOutcome     Json      // game-specific result data (animation_data)
+  result            RoundResult
+  payoutMultiplier  Decimal   @db.Decimal(10,4)
+  payoutAmount      Decimal   @db.Decimal(18,2)
+
+  // Audit
+  configSnapshot    Json      // full GameConfig at bet time
+  configSnapshotHash String   // EXTENSION (docs/05 §3): sha256(canonicalJSON)
+  forceUsed         ForceOverride @default(NONE)
+  demo              Boolean   @default(false) // demo-mode round (docs/20 §9 — excluded from stats/leaderboard)
+
+  createdAt         DateTime  @default(now())
+
+  @@unique([userId, requestId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([gameSlug, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@index([userId, gameSlug, createdAt])
+  @@index([result, gameSlug])
+}
+
+enum SharedBetStatus {
+  PLACED
+  SETTLING
+  SETTLED
+  REFUNDED
+}
+
+/// Durable placement record for house-clock games (Aviator, CrashX, WinGo).
+/// Wallet debit and this row are committed in the same transaction; Redis is
+/// only the live clock/cache, never the sole record of money owed.
+model SharedRoundBet {
+  id                String          @id @default(cuid())
+  userId            String
+  user              User            @relation(fields: [userId], references: [id])
+  gameSlug          String
+  roundId           String
+  durationSec       Int?
+  requestId         String
+  amount            Decimal         @db.Decimal(18,2)
+  walletType        WalletType
+  deductedFrom      Json
+  choice            Json?
+  joinMultiplier    Decimal         @default(1) @db.Decimal(12,4)
+  cashoutRequestedAt DateTime?
+  cashoutMultiplier Decimal?        @db.Decimal(12,4)
+  status            SharedBetStatus @default(PLACED)
+  result            RoundResult?
+  payoutMultiplier  Decimal?        @db.Decimal(12,4)
+  payoutAmount      Decimal?        @db.Decimal(18,2)
+  createdAt         DateTime        @default(now())
+  settledAt         DateTime?
+
+  // One bet per (user, requestId) is the idempotency key. The stale
+  // @@unique([gameSlug, roundId, userId]) was dropped by migration
+  // 202608191505 — removing the schema entry too, or every future
+  // `prisma migrate` would silently re-create it (H-08 drift). Same-target
+  // same-round duplicates are enforced race-free by the partial unique index
+  // added in 202608201200_harden_sharedbet_same_target.
+  @@unique([userId, requestId])
+  @@index([gameSlug, roundId, status])
+  @@index([status, createdAt])
+}
+
+/// Refresh-token family — the DURABLE record of a login session.
+///
+/// Token rotation used to be tracked only in Redis, which meant that during a
+/// Redis outage the reuse check could not run. The code then chose availability
+/// (accept the token) so players weren't all logged out — but that left a
+/// stolen refresh token replayable for its full 7-day life.
+///
+/// Postgres is the source of truth now, so the security check ALWAYS runs.
+/// Redis remains an optional read-through cache for speed only.
+model RefreshTokenFamily {
+  id          String    @id              // the `fam` claim (uuid)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Set when this family's token is exchanged. Presenting a used token again
+  /// means the token was copied → the whole family is revoked (theft response).
+  usedAt      DateTime?
+  /// Set when revoked: logout, reuse detected, or an admin action.
+  revokedAt   DateTime?
+  revokedReason String?
+
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  /// Chain of rotations, so revoking a family kills every descendant token.
+  replacedById String?  @unique
+  parentId     String?  @unique
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([expiresAt])
+}
+
+enum SeedStatus {
+  ACTIVE
+  REVEALED
+}
+
+model SeedPair {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id])
+
+  serverSeed      String    // kept SECRET until revealed (SELECT-excluded)
+  serverSeedHash  String    // SHA-256 of serverSeed, shown upfront
+  clientSeed      String
+  nonce           Int       @default(0)
+
+  status          SeedStatus @default(ACTIVE)
+  createdAt       DateTime  @default(now())
+  revealedAt      DateTime?
+
+  rounds          GameRound[]
+
+  @@index([userId, status])
+}
+
+// ─────────────────────────────────────────
+// FINANCIAL
+// ─────────────────────────────────────────
+
+enum DepositStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+model Deposit {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id])
+
+  amount          Decimal   @db.Decimal(18,2)
+  status          DepositStatus @default(PENDING)
+  /// Package the player bought, when they picked one. Held so the bonus that
+  /// came with it is applied at approval time using the terms in force when
+  /// they paid, even if an admin edits the package later.
+  packageId       String?
+  package         DepositPackage? @relation(fields: [packageId], references: [id])
+  /// Real credits promised when the package was purchased. Snapshotted so a
+  /// later package edit cannot change an already-paid order.
+  packageCredits  Decimal?  @db.Decimal(18,2)
+  packageBonus    Decimal?  @db.Decimal(18,2)
+  paymentMethod   String
+  accountLabel    String?
+  // D-061: snapshot of the payment account the user paid TO + the sender's
+  // account number they paid FROM (confirmation reference)
+  accountDetails  Json?
+  senderAccount   String?
+  proofObjectKey  String?   // v7 §5 presigned upload object key
+  proofImageUrl   String?
+  referenceNumber String?   // unique reference shown to player (v4 deposit flow)
+  payfastConfigSnapshot String?
+  payfastLaunchHash String? @unique
+  payfastLaunchData String?
+  payfastLaunchExpiresAt DateTime?
+  payfastLastCheckedAt DateTime?
+  payfastLastError String?
+  payfastCustomerIp String?
+  payfastCallbackHash String?
+  payfastTransactionId String? @unique
+  gatewayId       String?
+
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  notes           String?
+
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+}
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+  CANCELLED
+}
+
+model Withdrawal {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id])
+
+  amount          Decimal   @db.Decimal(18,2)
+  fee             Decimal   @default(0) @db.Decimal(18,2)
+  netAmount       Decimal   @db.Decimal(18,2)
+  status          WithdrawalStatus @default(PENDING)
+
+  payoutAccountId String
+  payoutAccount   PayoutAccount @relation(fields: [payoutAccountId], references: [id])
+  gatewayId       String?
+  requiresReview  Boolean   @default(false)  // v6: account added < 24h → admin flag
+
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  notes           String?
+
+  // ── Dual control (security hardening) ───────────────────────────────────
+  // True when the amount was at/above the dual-control threshold at CREATION
+  // time. Snapshotted, so raising or lowering the threshold later cannot
+  // retroactively un-approve a payout that two people already signed off.
+  dualControlRequired Boolean @default(false)
+  /// First admin's approval. While this is set and status is still PENDING the
+  /// payout is waiting on a SECOND, different admin.
+  firstApprovedBy String?
+  firstApprovedAt DateTime?
+  /// The second admin — the one whose approval actually released the money.
+  secondApprovedBy String?
+  secondApprovedAt DateTime?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+}
+
+model PayoutAccount {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id])
+
+  type            String    // "bank" | "mobile_wallet" | "mobile_money"
+  label           String
+  accountDetails  String    // AES-256-GCM encrypted JSON
+  isLocked        Boolean   @default(false)
+  lockedBy        String?
+  lockedAt        DateTime?
+  createdAt       DateTime  @default(now())
+
+  withdrawals     Withdrawal[]
+
+  @@index([userId])
+}
+
+model ManualPaymentAccount {
+  id              String    @id @default(cuid())
+  type            String
+  label           String
+  accountDetails  Json
+  isActive        Boolean   @default(true)
+  displayOrder    Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// ─────────────────────────────────────────
+// BONUSES & ENGAGEMENT
+// ─────────────────────────────────────────
+
+model DailyCheckin {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  date        DateTime  @db.Date
+  streakCount Int
+  bonusAmount Decimal   @db.Decimal(18,2)
+  claimedAt   DateTime  @default(now())
+
+  @@unique([userId, date])
+  @@index([userId])
+}
+
+model GiftTransaction {
+  id          String    @id @default(cuid())
+  senderId    String
+  sender      User      @relation("GiftSender", fields: [senderId], references: [id])
+  receiverId  String
+  receiver    User      @relation("GiftReceiver", fields: [receiverId], references: [id])
+  amount      Decimal   @db.Decimal(18,2)
+  message     String?
+  createdAt   DateTime  @default(now())
+
+  @@index([senderId])
+  @@index([receiverId])
+}
+
+model WinStreak {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id])
+  currentStreak   Int       @default(0)
+  lastWinAt       DateTime?
+  milestone5Paid  Boolean   @default(false)
+  milestone10Paid Boolean   @default(false)
+  milestone25Paid Boolean   @default(false)
+  updatedAt       DateTime  @updatedAt
+}
+
+model RakebackRecord {
+  id          String    @id @default(cuid())
+  userId      String
+  weekStart   DateTime  @db.Date
+  weekEnd     DateTime  @db.Date
+  totalLost   Decimal   @db.Decimal(18,2)
+  rakeback    Decimal   @db.Decimal(18,2)
+  paidAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([userId, weekStart])
+}
+
+enum LeaderboardPeriod {
+  DAILY
+  WEEKLY
+  ALL_TIME
+}
+
+model LeaderboardEntry {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id])
+  period          LeaderboardPeriod
+  periodKey       String    // e.g., "2024-01-15" daily, "2024-W03" weekly
+  totalWagered    Decimal   @db.Decimal(18,2)
+  totalWon        Decimal   @db.Decimal(18,2)
+  netProfit       Decimal   @db.Decimal(18,2)
+  biggestWin      Decimal   @db.Decimal(18,2)
+  roundsPlayed    Int
+  rank            Int?
+
+  @@unique([userId, period, periodKey])
+  @@index([period, periodKey, totalWagered(sort: Desc)])
+}
+
+// ─────────────────────────────────────────
+// ADMIN
+// ─────────────────────────────────────────
+
+model AdminUser {
+  id            String    @id @default(cuid())
+  username      String    @unique
+  passwordHash  String
+  displayName   String?
+  isSuperAdmin  Boolean   @default(false)
+  /// When true, this super admin is hidden from the managers list shown to
+  /// other admins — they cannot tell a super admin exists.
+  hiddenFromAdmins Boolean @default(false)
+  createdBy     String?
+
+  // Permission flags
+  permFinancial  Boolean  @default(false)
+  permUsers      Boolean  @default(false)
+  permReporting  Boolean  @default(false)
+  permChat       Boolean  @default(false)
+  permGames      Boolean  @default(false)
+  permSettings   Boolean  @default(false)
+
+  lastLoginAt   DateTime?
+  /// Session version for the panel: bumped on sign-out and on credential
+  /// changes, so an admin cookie copied off a laptop stops working immediately
+  /// instead of living out its 8-hour validity.
+  sessionVersion Int      @default(0)
+  /// Sliding activity stamp for the panel idle timeout. Written at most once a
+  /// minute per admin (see adminAuthMiddleware), so the panel does not turn
+  /// every request into a database write.
+  lastActiveAt  DateTime?
+  createdAt     DateTime  @default(now())
+
+  auditLogs     AdminAuditLog[]
+  supportMessages SupportMessage[]
+}
+
+model AdminAuditLog {
+  id            String    @id @default(cuid())
+  adminId       String
+  admin         AdminUser @relation(fields: [adminId], references: [id])
+  action        String    // "game.config.update", "user.suspend", ...
+  targetType    String?
+  targetId      String?
+  beforeState   Json?
+  afterState    Json?
+  ipAddress     String?
+  createdAt     DateTime  @default(now())
+
+  @@index([adminId, createdAt(sort: Desc)])
+  @@index([targetType, targetId])
+  @@index([createdAt(sort: Desc)])
+}
+
+// ─────────────────────────────────────────
+// FRAUD (docs/20 §18)
+// ─────────────────────────────────────────
+
+model FraudSignal {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  signal      String   // NEW_ACCOUNT_WITHDRAWAL | MULTIPLE_ACCOUNTS_SAME_DEVICE | ...
+  severity    String   // low | medium | high
+  data        Json
+  status      String   @default("new")  // new | reviewed | ignored
+  notes       String?
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([status, severity])
+  @@index([userId])
+}
+
+/// One row per (user, device fingerprint). Login updates lastIp / lastSeenAt.
+model UserDevice {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fingerprintHash String
+  userAgent       String?
+  screen          String?
+  timezone        String?
+  language        String?
+  firstIp         String?
+  lastIp          String?
+  ipCountry       String?
+  loginCount      Int      @default(1)
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+
+  @@unique([userId, fingerprintHash])
+  @@index([fingerprintHash])
+  @@index([lastIp])
+}
+
+/// Append-only login/signup events for the fraud drawer (IP, UA, geo header).
+model UserLoginEvent {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip              String
+  ipCountry       String?
+  userAgent       String?
+  fingerprintHash String?
+  timezone        String?
+  language        String?
+  screen          String?
+  createdAt       DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([ip, createdAt(sort: Desc)])
+  @@index([fingerprintHash])
+}
+
+// ─────────────────────────────────────────
+// SUPPORT & NOTIFICATIONS
+// ─────────────────────────────────────────
+
+enum ConvoStatus {
+  OPEN
+  ASSIGNED
+  CLOSED
+}
+
+model SupportConversation {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  status      ConvoStatus @default(OPEN)
+  assignedTo  String?
+  subject     String?
+  /// deposit | withdrawal | game | account | bonus | other
+  category        String?
+  /// deposit | withdrawal — optional link to a money row
+  referenceType   String?
+  referenceId     String?
+  playerLastReadAt DateTime?
+  adminLastReadAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  messages    SupportMessage[]
+  recovery    RecoveryRequest?
+
+  @@index([status, createdAt])
+  @@index([userId])
+  @@index([assignedTo, status])
+  @@index([referenceType, referenceId])
+}
+
+enum SenderType {
+  USER
+  ADMIN
+}
+
+model SupportMessage {
+  id              String    @id @default(cuid())
+  conversationId  String
+  conversation    SupportConversation @relation(fields: [conversationId], references: [id])
+  senderType      SenderType
+  // D-078: polymorphic sender — admin messages set senderId (FK → AdminUser),
+  // player messages set userId (FK → User). Before this, players could NOT
+  // send messages (senderId FK to AdminUser failed → P2003 500).
+  senderId        String?
+  adminSender     AdminUser? @relation(fields: [senderId], references: [id])
+  userId          String?
+  userSender      User?     @relation("UserSupportMessages", fields: [userId], references: [id])
+  body            String
+  attachmentUrl   String?
+  createdAt       DateTime  @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+// ─────────────────────────────────────────
+// ACCOUNT RECOVERY CONSOLE
+// ─────────────────────────────────────────
+// Email and SMS are deliberately not used on this platform, so a locked-out
+// player cannot receive a reset link or an OTP. Recovery is therefore
+// agent-mediated: the player submits a public request and keeps a TICKET code,
+// an agent verifies them against evidence that only the real owner has
+// (deposit reference numbers, sender accounts, device fingerprints), a SECOND
+// admin approves, and only then does the player collect a one-time RECOVERY
+// code on their ticket page to set a new password.
+//
+// Two independent secrets are required to take an account over: the ticket
+// code (held by the claimant from request time) AND the recovery code (only
+// issued after verification). Neither is ever sent to an address supplied by
+// the claimant.
+enum RecoveryStatus {
+  PENDING // submitted, no agent has looked yet
+  IN_REVIEW // an agent has started checking evidence
+  VERIFIED // one admin ticked >=3 evidence checks
+  APPROVED // a second admin approved — code issued, freeze applied
+  REDEEMED // player set a new password with the code
+  REJECTED // refused (reason recorded, visible on the ticket)
+  EXPIRED // code expired / too many wrong codes — a new one may be issued
+}
+
+model RecoveryRequest {
+  id String @id @default(cuid())
+
+  /// Null when the claimed phone is not on file. Those requests are kept (not
+  /// rejected) so the public flow behaves identically for a real and a
+  /// non-existent number — the endpoint must not become an account oracle.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// Normalized (+92…) number the claimant typed.
+  phoneClaimed String
+  /// What the claimant volunteered up front (last deposit ref, sender account…).
+  answers      Json?
+
+  /// The support thread this request rides on, so agents work in the existing
+  /// inbox UI. The player reaches the same thread through their ticket code.
+  conversationId String?               @unique
+  conversation   SupportConversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  status RecoveryStatus @default(PENDING)
+
+  /// sha256 of the ticket code (TKT-…). The plaintext exists only in the
+  /// claimant's hands: it is shown once at request time and never stored.
+  ticketHash String @unique
+
+  /// Agent checklist — one boolean per RECOVERY_EVIDENCE key.
+  checks     Json?
+  verifiedBy String?
+  verifiedAt DateTime?
+  /// Dual control: MUST differ from verifiedBy (enforced server-side).
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectedBy      String?
+  rejectedAt      DateTime?
+  rejectReason    String?
+
+  /// sha256 of the one-time recovery code (RVC-…), plus an ENCRYPTED copy so
+  /// the ticket page can display it to its holder. An agent can never see it.
+  codeHash      String?
+  codeEncrypted String?
+  codeExpiresAt DateTime?
+  /// Wrong-code attempts. At the cap the code is destroyed and the request
+  /// goes EXPIRED — a second approval begins a fresh challenge.
+  attempts   Int       @default(0)
+  redeemedAt DateTime?
+
+  /// Withdrawal freeze applied on approval (mirrored to User.withdrawalFrozenUntil).
+  freezeUntil      DateTime?
+  freezeHours      Int?
+  freezeReleasedAt DateTime?
+
+  ip        String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([userId])
+}
+
+/// Admin-managed help categories. Not the ticket-topic enum — operators add,
+/// rename, hide, and delete these as the desk evolves.
+model FaqCategory {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  nameEn    String
+  nameUr    String   @default("")
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  faqs      Faq[]
+
+  @@index([isActive, sortOrder])
+}
+
+model Faq {
+  id          String      @id @default(cuid())
+  categoryId  String
+  category    FaqCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  questionEn  String
+  questionUr  String      @default("")
+  answerEn    String      @db.Text
+  answerUr    String      @default("") @db.Text
+  sortOrder   Int         @default(0)
+  isPublished Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([categoryId, isPublished, sortOrder])
+}
+
+model Notification {
+  id          String    @id @default(cuid())
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id])
+  type        String    // "system"|"bonus"|"deposit"|"withdrawal"|"broadcast"|"bigwin"
+  title       String
+  body        String
+  actionUrl   String?
+  isRead      Boolean   @default(false)
+  isRetracted Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, isRead, createdAt])
+}
+
+// M-05: per-user read state for BROADCAST (userId=null) notifications. The
+// Notification row is shared by everyone, so `isRead` on it cannot represent
+// "this player has read it" — one player's read used to mark nobody's, and
+// broadcasts stayed unread forever in every bell.
+model NotificationRead {
+  id             String   @id @default(cuid())
+  notificationId String
+  userId         String
+  readAt         DateTime @default(now())
+
+  @@unique([notificationId, userId])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────
+// SETTINGS (key-value store) & LEGAL
+// ─────────────────────────────────────────
+
+/// Purchasable top-up packages shown on the deposit page.
+/// The player pays `price`; their wallet is credited `credits` (REAL) plus
+/// `bonus` (BONUS) when an admin approves the deposit. Keeping the two apart
+/// means promo value lands in the bonus wallet and must be wagered.
+model DepositPackage {
+  id          String    @id @default(cuid())
+  name        String
+  /// what the player pays
+  price       Decimal   @db.Decimal(18,2)
+  /// real money credited on approval (usually == price)
+  credits     Decimal   @db.Decimal(18,2)
+  /// extra promo credited to the BONUS wallet
+  bonus       Decimal   @db.Decimal(18,2) @default(0)
+  /// optional flash such as "MOST POPULAR" / "+20% FREE"
+  badge       String?
+  description String?
+  sortOrder   Int       @default(0)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  deposits    Deposit[]
+
+  @@index([isActive, sortOrder])
+}
+
+model Setting {
+  key         String    @id
+  value       Json
+  updatedBy   String?
+  updatedAt   DateTime  @updatedAt
+}
+
+model LegalPage {
+  id          String    @id @default(cuid())
+  slug        String
+  language    String    @default("en")
+  title       String
+  content     String    @db.Text
+  updatedBy   String?
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([slug, language])
+}
+
+// ─────────────────────────────────────────
+// SECURITY HARDENING (post-inventory)
+// ─────────────────────────────────────────
+
+/// Previous password hashes for reuse prevention. Only the last few are kept;
+/// hashes are bcrypt, so this is not a plaintext history.
+model PasswordHistory {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+/// Persisted security alerts (monitoring). Every alert an operator should act
+/// on lands here as well as being pushed to the admin feed, so "was anyone
+/// told?" is answerable after the fact instead of living in a chat log.
+model SecurityAlert {
+  id        String   @id @default(cuid())
+  /// e.g. backup.stale | health.degraded | fraud.spike | rate_limit.store_down
+  kind      String
+  severity  String   @default("medium") // low | medium | high | critical
+  message   String
+  data      Json?
+  /// Dedupe key so a flapping condition raises one alert, not one per minute.
+  dedupeKey String?
+  status    String   @default("open") // open | acknowledged | resolved
+  acknowledgedBy String?
+  acknowledgedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([kind, createdAt(sort: Desc)])
+  @@index([dedupeKey, createdAt(sort: Desc)])
+}
+
+/// DUAL CONTROL for admin wallet credits/debits.
+///
+/// Handing a player money is as sensitive as paying one out — a single admin
+/// crediting a colluding account is the classic insider payout. Above
+/// `admin_credit_dual_control_threshold` the adjustment is parked here and a
+/// DIFFERENT admin must clear it before any balance moves.
+model WalletAdjustment {
+  id        String @id @default(cuid())
+  userId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// real | bonus | gifted
+  walletType String
+  /// Signed: positive credits, negative debits.
+  amount     Decimal @db.Decimal(18,2)
+  reason     String?
+
+  status String @default("PENDING") // PENDING | APPROVED | REJECTED
+
+  requestedBy String
+  requestedAt DateTime @default(now())
+  approvedBy  String?
+  approvedAt  DateTime?
+  rejectedBy  String?
+  rejectedAt  DateTime?
+  rejectReason String?
+  /// The ledger row created when it was approved (traceability one hop either way).
+  appliedTransactionId String?
+
+  @@index([status, requestedAt(sort: Desc)])
+  @@index([userId])
+}
